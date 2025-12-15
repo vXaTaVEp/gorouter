@@ -16,8 +16,14 @@ import (
 
 // RouteInfo 存储路由信息
 type RouteInfo struct {
-	Path   string
-	Method string
+	Path        string
+	Method      string
+	RequireAuth bool
+	Description string
+	Tags        []string
+	// 类型信息用于 Swagger 文档生成
+	RequestType  reflect.Type
+	ResponseType reflect.Type
 }
 
 // Router 管理HTTP路由
@@ -67,7 +73,15 @@ func Post[Req any, Resp any](
 	r *Router, path string, handlerFunc postHandlerFunc[Req, Resp],
 ) {
 	r.registerHandler(path, http.MethodPost, postHandler(r.cfg, handlerFunc, false))
-	r.routes = append(r.routes, RouteInfo{Path: path, Method: "POST"})
+	var req Req
+	var resp Resp
+	r.routes = append(r.routes, RouteInfo{
+		Path:         path,
+		Method:       "POST",
+		RequireAuth:  false,
+		RequestType:  reflect.TypeOf(req),
+		ResponseType: reflect.TypeOf(resp),
+	})
 }
 
 // PostWithAuth 添加需要JWT认证的路由
@@ -75,7 +89,15 @@ func PostWithAuth[Req any, Resp any](
 	r *Router, path string, handlerFunc postHandlerFunc[Req, Resp],
 ) {
 	r.registerHandler(path, http.MethodPost, postHandler(r.cfg, handlerFunc, true))
-	r.routes = append(r.routes, RouteInfo{Path: path, Method: "POST"})
+	var req Req
+	var resp Resp
+	r.routes = append(r.routes, RouteInfo{
+		Path:         path,
+		Method:       "POST",
+		RequireAuth:  true,
+		RequestType:  reflect.TypeOf(req),
+		ResponseType: reflect.TypeOf(resp),
+	})
 }
 
 // Get 添加路由，使用getHandler包装处理函数
@@ -83,7 +105,15 @@ func Get[Req any, Resp any](
 	r *Router, path string, handlerFunc getHandlerFunc[Req, Resp],
 ) {
 	r.registerHandler(path, http.MethodGet, getHandler(r.cfg, handlerFunc, false))
-	r.routes = append(r.routes, RouteInfo{Path: path, Method: "GET"})
+	var req Req
+	var resp Resp
+	r.routes = append(r.routes, RouteInfo{
+		Path:         path,
+		Method:       "GET",
+		RequireAuth:  false,
+		RequestType:  reflect.TypeOf(req),
+		ResponseType: reflect.TypeOf(resp),
+	})
 }
 
 // GetWithAuth 添加需要JWT认证的路由
@@ -91,7 +121,15 @@ func GetWithAuth[Req any, Resp any](
 	r *Router, path string, handlerFunc getHandlerFunc[Req, Resp],
 ) {
 	r.registerHandler(path, http.MethodGet, getHandler(r.cfg, handlerFunc, true))
-	r.routes = append(r.routes, RouteInfo{Path: path, Method: "GET"})
+	var req Req
+	var resp Resp
+	r.routes = append(r.routes, RouteInfo{
+		Path:         path,
+		Method:       "GET",
+		RequireAuth:  true,
+		RequestType:  reflect.TypeOf(req),
+		ResponseType: reflect.TypeOf(resp),
+	})
 }
 
 // Put 添加路由，使用putHandler包装处理函数
@@ -99,7 +137,15 @@ func Put[Req any, Resp any](
 	r *Router, path string, handlerFunc putHandlerFunc[Req, Resp],
 ) {
 	r.registerHandler(path, http.MethodPut, putHandler(r.cfg, handlerFunc, false))
-	r.routes = append(r.routes, RouteInfo{Path: path, Method: "PUT"})
+	var req Req
+	var resp Resp
+	r.routes = append(r.routes, RouteInfo{
+		Path:         path,
+		Method:       "PUT",
+		RequireAuth:  false,
+		RequestType:  reflect.TypeOf(req),
+		ResponseType: reflect.TypeOf(resp),
+	})
 }
 
 // PutWithAuth 添加需要JWT认证的路由
@@ -107,7 +153,15 @@ func PutWithAuth[Req any, Resp any](
 	r *Router, path string, handlerFunc putHandlerFunc[Req, Resp],
 ) {
 	r.registerHandler(path, http.MethodPut, putHandler(r.cfg, handlerFunc, true))
-	r.routes = append(r.routes, RouteInfo{Path: path, Method: "PUT"})
+	var req Req
+	var resp Resp
+	r.routes = append(r.routes, RouteInfo{
+		Path:         path,
+		Method:       "PUT",
+		RequireAuth:  true,
+		RequestType:  reflect.TypeOf(req),
+		ResponseType: reflect.TypeOf(resp),
+	})
 }
 
 // Delete 添加路由，使用deleteHandler包装处理函数
@@ -115,7 +169,15 @@ func Delete[Req any, Resp any](
 	r *Router, path string, handlerFunc deleteHandlerFunc[Req, Resp],
 ) {
 	r.registerHandler(path, http.MethodDelete, deleteHandler(r.cfg, handlerFunc, false))
-	r.routes = append(r.routes, RouteInfo{Path: path, Method: "DELETE"})
+	var req Req
+	var resp Resp
+	r.routes = append(r.routes, RouteInfo{
+		Path:         path,
+		Method:       "DELETE",
+		RequireAuth:  false,
+		RequestType:  reflect.TypeOf(req),
+		ResponseType: reflect.TypeOf(resp),
+	})
 }
 
 // DeleteWithAuth 添加需要JWT认证的路由
@@ -123,7 +185,15 @@ func DeleteWithAuth[Req any, Resp any](
 	r *Router, path string, handlerFunc deleteHandlerFunc[Req, Resp],
 ) {
 	r.registerHandler(path, http.MethodDelete, deleteHandler(r.cfg, handlerFunc, true))
-	r.routes = append(r.routes, RouteInfo{Path: path, Method: "DELETE"})
+	var req Req
+	var resp Resp
+	r.routes = append(r.routes, RouteInfo{
+		Path:         path,
+		Method:       "DELETE",
+		RequireAuth:  true,
+		RequestType:  reflect.TypeOf(req),
+		ResponseType: reflect.TypeOf(resp),
+	})
 }
 
 // registerHandler 注册路由处理器
