@@ -111,36 +111,55 @@ func GetWithAuth[Req any, Resp any](
 	r.routes = append(r.routes, RouteInfo{Path: path, Method: "GET"})
 }
 
+// Put 添加路由，使用putHandler包装处理函数
+func Put[Req any, Resp any](
+	r *Router, path string, handlerFunc putHandlerFunc[Req, Resp],
+) {
+	r.mux.HandleFunc(
+		path,
+		putHandler(r.cfg, handlerFunc, false),
+	)
+	r.routes = append(r.routes, RouteInfo{Path: path, Method: "PUT"})
+}
+
+// PutWithAuth 添加需要JWT认证的路由
+func PutWithAuth[Req any, Resp any](
+	r *Router, path string, handlerFunc putHandlerFunc[Req, Resp],
+) {
+	r.mux.HandleFunc(
+		path,
+		putHandler(r.cfg, handlerFunc, true),
+	)
+	r.routes = append(r.routes, RouteInfo{Path: path, Method: "PUT"})
+}
+
+// Delete 添加路由，使用deleteHandler包装处理函数
+func Delete[Req any, Resp any](
+	r *Router, path string, handlerFunc deleteHandlerFunc[Req, Resp],
+) {
+	r.mux.HandleFunc(
+		path,
+		deleteHandler(r.cfg, handlerFunc, false),
+	)
+	r.routes = append(r.routes, RouteInfo{Path: path, Method: "DELETE"})
+}
+
+// DeleteWithAuth 添加需要JWT认证的路由
+func DeleteWithAuth[Req any, Resp any](
+	r *Router, path string, handlerFunc deleteHandlerFunc[Req, Resp],
+) {
+	r.mux.HandleFunc(
+		path,
+		deleteHandler(r.cfg, handlerFunc, true),
+	)
+	r.routes = append(r.routes, RouteInfo{Path: path, Method: "DELETE"})
+}
+
 // ServeHTTP 实现http.Handler接口，应用中间件
 func (r *Router) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	// 应用中间件链：Recovery -> CORS -> Logger -> 业务处理
 	handler := Recovery(CORS(Logger(r.mux)))
 	handler.ServeHTTP(w, req)
-}
-
-type Context interface {
-	GetContext() context.Context
-	GetConfig() Config
-	GetClaims() Claims
-}
-
-// handlerContext 处理器上下文，包含配置等信息
-type handlerContext struct {
-	ctx    context.Context
-	config Config
-	claims Claims
-}
-
-func (h handlerContext) GetContext() context.Context {
-	return h.ctx
-}
-
-func (h handlerContext) GetConfig() Config {
-	return h.config
-}
-
-func (h handlerContext) GetClaims() Claims {
-	return h.claims
 }
 
 // postHandlerFunc 定义业务处理函数的通用类型
@@ -150,6 +169,14 @@ type postHandlerFunc[Req any, Resp any] func(Context, *Req) (*Resp, error)
 // getHandlerFunc 定义业务处理函数的通用类型
 // 接收一个上下文、请求结构体指针，返回一个响应结构体和错误
 type getHandlerFunc[Req any, Resp any] func(Context, *Req) (*Resp, error)
+
+// putHandlerFunc 定义业务处理函数的通用类型
+// 接收一个上下文、请求结构体指针，返回一个响应结构体和错误
+type putHandlerFunc[Req any, Resp any] func(Context, *Req) (*Resp, error)
+
+// deleteHandlerFunc 定义业务处理函数的通用类型
+// 接收一个上下文、请求结构体指针，返回一个响应结构体和错误
+type deleteHandlerFunc[Req any, Resp any] func(Context, *Req) (*Resp, error)
 
 // postHandler 封装业务处理函数为HTTP处理器
 // 处理请求解析和响应生成，确保所有接口使用POST方法
@@ -292,6 +319,174 @@ func getHandler[Req any, Resp any](cfg Config, handler getHandlerFunc[Req, Resp]
 
 		// 记录请求参数，使用JSON格式
 		l.Infof("%s %s", requestName, PrettyJSON(req))
+
+		// 调用业务处理函数
+		resp, err := handler(ctx, &req)
+		if err != nil {
+			sendErrorResponse(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+
+		fullResp := NewSuccessCommonResponse(resp)
+
+		// 发送响应
+		sendJSONResponse(w, fullResp)
+
+		duration := time.Since(start)
+
+		respType := reflect.TypeOf(resp)
+		respName := ""
+		if respType != nil {
+			if respType.Kind() == reflect.Ptr {
+				respName = respType.Elem().Name()
+			} else {
+				respName = respType.Name()
+			}
+		} else {
+			respName = "nil"
+		}
+
+		// 使用JSON格式打印响应
+		l.Infof("%s %s, cost: %v", respName, PrettyJSON(fullResp), duration)
+	}
+}
+
+// putHandler 封装业务处理函数为HTTP处理器
+// 处理请求解析和响应生成，确保所有接口使用PUT方法
+func putHandler[Req any, Resp any](cfg Config, handler putHandlerFunc[Req, Resp], requireAuth bool) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		// 只允许PUT方法
+		if r.Method != http.MethodPut {
+			sendErrorResponse(w, http.StatusMethodNotAllowed, "only PUT method is supported")
+			return
+		}
+
+		// 创建处理器上下文
+		ctx := &handlerContext{
+			ctx:    r.Context(),
+			config: cfg,
+		}
+
+		// JWT认证中间件
+		if requireAuth {
+			claims, err := GetUserFromRequest(cfg.GetSecretKey(), r)
+			if err != nil {
+				sendErrorResponse(w, http.StatusUnauthorized, "unauthorized: "+err.Error())
+				return
+			}
+			// 将用户信息存储到请求上下文中，供后续使用
+			ctx.claims = *claims
+		}
+
+		// 记录请求开始时间
+		start := time.Now()
+
+		// 解析请求体
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			sendErrorResponse(w, http.StatusBadRequest, "failed to read request body")
+			return
+		}
+		defer r.Body.Close()
+
+		// 创建请求类型的实例
+		var req Req
+		if len(body) > 0 {
+			if err := json.Unmarshal(body, &req); err != nil {
+				sendErrorResponse(w, http.StatusBadRequest, "invalid JSON data")
+				return
+			}
+
+			// 记录请求参数，使用JSON格式
+			requestName := reflect.TypeOf(req).Name()
+			l.Infof("%s %s", requestName, PrettyJSON(req))
+		} else {
+			l.Infof("Request: %s {}")
+		}
+
+		// 调用业务处理函数
+		resp, err := handler(ctx, &req)
+		if err != nil {
+			sendErrorResponse(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+
+		fullResp := NewSuccessCommonResponse(resp)
+
+		// 发送响应
+		sendJSONResponse(w, fullResp)
+
+		duration := time.Since(start)
+
+		respType := reflect.TypeOf(resp)
+		respName := ""
+		if respType != nil {
+			if respType.Kind() == reflect.Ptr {
+				respName = respType.Elem().Name()
+			} else {
+				respName = respType.Name()
+			}
+		} else {
+			respName = "nil"
+		}
+
+		// 使用JSON格式打印响应
+		l.Infof("%s %s, cost: %v", respName, PrettyJSON(fullResp), duration)
+	}
+}
+
+// deleteHandler 封装业务处理函数为HTTP处理器
+// 处理请求解析和响应生成，确保所有接口使用DELETE方法
+func deleteHandler[Req any, Resp any](cfg Config, handler deleteHandlerFunc[Req, Resp], requireAuth bool) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		// 只允许DELETE方法
+		if r.Method != http.MethodDelete {
+			sendErrorResponse(w, http.StatusMethodNotAllowed, "only DELETE method is supported")
+			return
+		}
+
+		// 创建处理器上下文
+		ctx := &handlerContext{
+			ctx:    r.Context(),
+			config: cfg,
+		}
+
+		// JWT认证中间件
+		if requireAuth {
+			claims, err := GetUserFromRequest(cfg.GetSecretKey(), r)
+			if err != nil {
+				sendErrorResponse(w, http.StatusUnauthorized, "unauthorized: "+err.Error())
+				return
+			}
+			// 将用户信息存储到请求上下文中，供后续使用
+			ctx.claims = *claims
+		}
+
+		// 记录请求开始时间
+		start := time.Now()
+
+		// 解析请求体
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			sendErrorResponse(w, http.StatusBadRequest, "failed to read request body")
+			return
+		}
+		defer r.Body.Close()
+
+		// 创建请求类型的实例
+		var req Req
+		if len(body) > 0 {
+			if err := json.Unmarshal(body, &req); err != nil {
+				sendErrorResponse(w, http.StatusBadRequest, "invalid JSON data")
+				return
+			}
+
+			// 记录请求参数，使用JSON格式
+			requestName := reflect.TypeOf(req).Name()
+			l.Infof("%s %s", requestName, PrettyJSON(req))
+		} else {
+			l.Infof("Request: %s {}")
+		}
 
 		// 调用业务处理函数
 		resp, err := handler(ctx, &req)
