@@ -136,29 +136,37 @@ func (r *Router) registerHandler(path, method string, handler http.HandlerFunc) 
 
 // ServeHTTP 实现http.Handler接口，应用中间件
 func (r *Router) ServeHTTP(w http.ResponseWriter, req *http.Request) {
-	// 查找匹配的路由处理器
-	pathHandlers, exists := r.handlers[req.URL.Path]
-	if !exists {
-		// 路径不存在，返回404
-		sendErrorResponse(w, http.StatusNotFound, "path not found")
-		return
-	}
-
-	handler, exists := pathHandlers[req.Method]
-	if !exists {
-		// 方法不存在，返回405 Method Not Allowed
-		// 收集该路径支持的方法
-		allowedMethods := make([]string, 0, len(pathHandlers))
-		for method := range pathHandlers {
-			allowedMethods = append(allowedMethods, method)
+	// 创建路由处理器，在中间件链内部执行路由匹配
+	// 这样确保所有请求（包括 OPTIONS）都先经过中间件
+	routeHandler := http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		// 查找匹配的路由处理器
+		pathHandlers, exists := r.handlers[req.URL.Path]
+		if !exists {
+			// 路径不存在，返回404
+			sendErrorResponse(w, http.StatusNotFound, "path not found")
+			return
 		}
-		w.Header().Set("Allow", strings.Join(allowedMethods, ", "))
-		sendErrorResponse(w, http.StatusMethodNotAllowed, fmt.Sprintf("method %s not allowed for path %s", req.Method, req.URL.Path))
-		return
-	}
 
-	// 应用中间件链：Recovery -> CORS -> Logger -> 业务处理
-	middlewareChain := Recovery(CORS(Logger(http.HandlerFunc(handler))))
+		handler, exists := pathHandlers[req.Method]
+		if !exists {
+			// 方法不存在，返回405 Method Not Allowed
+			// 收集该路径支持的方法
+			allowedMethods := make([]string, 0, len(pathHandlers))
+			for method := range pathHandlers {
+				allowedMethods = append(allowedMethods, method)
+			}
+			w.Header().Set("Allow", strings.Join(allowedMethods, ", "))
+			sendErrorResponse(w, http.StatusMethodNotAllowed, fmt.Sprintf("method %s not allowed for path %s", req.Method, req.URL.Path))
+			return
+		}
+
+		// 执行匹配的处理器
+		handler(w, req)
+	})
+
+	// 应用中间件链：Recovery -> CORS -> Logger -> 路由处理器
+	// 这样确保所有请求（包括 OPTIONS）都先经过中间件
+	middlewareChain := Recovery(CORS(Logger(routeHandler)))
 	middlewareChain.ServeHTTP(w, req)
 }
 

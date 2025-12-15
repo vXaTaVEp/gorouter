@@ -912,3 +912,49 @@ func TestSamePathMethodNotAllowed(t *testing.T) {
 		t.Errorf("DELETE 方法期望状态码 %d, 得到 %d", http.StatusMethodNotAllowed, w.Code)
 	}
 }
+
+// TestCORSPreflight 测试 CORS 预检请求（OPTIONS）
+func TestCORSPreflight(t *testing.T) {
+	cfg := newTestConfig()
+	router := NewRouter(cfg)
+
+	// 注册一个 POST 路由，但不注册 OPTIONS
+	Post(router, "/api/test", func(ctx Context, req *TestRequest) (*TestResponse, error) {
+		return &TestResponse{Result: "POST test"}, nil
+	})
+
+	// 测试 OPTIONS 预检请求（应该由 CORS 中间件处理，返回 200）
+	req := httptest.NewRequest(http.MethodOptions, "/api/test", nil)
+	req.Header.Set("Origin", "https://example.com")
+	req.Header.Set("Access-Control-Request-Method", "POST")
+	req.Header.Set("Access-Control-Request-Headers", "Content-Type")
+	w := httptest.NewRecorder()
+
+	router.ServeHTTP(w, req)
+
+	// OPTIONS 请求应该返回 200，而不是 405
+	if w.Code != http.StatusOK {
+		t.Errorf("OPTIONS 预检请求期望状态码 %d, 得到 %d", http.StatusOK, w.Code)
+	}
+
+	// 验证 CORS 头存在
+	if w.Header().Get("Access-Control-Allow-Origin") == "" {
+		t.Error("期望 Access-Control-Allow-Origin 头存在")
+	}
+
+	if w.Header().Get("Access-Control-Allow-Methods") == "" {
+		t.Error("期望 Access-Control-Allow-Methods 头存在")
+	}
+
+	// 测试不存在的路径的 OPTIONS 请求（也应该由 CORS 处理）
+	req = httptest.NewRequest(http.MethodOptions, "/api/notfound", nil)
+	req.Header.Set("Origin", "https://example.com")
+	w = httptest.NewRecorder()
+
+	router.ServeHTTP(w, req)
+
+	// 即使路径不存在，OPTIONS 请求也应该返回 200（由 CORS 处理）
+	if w.Code != http.StatusOK {
+		t.Errorf("不存在的路径的 OPTIONS 请求期望状态码 %d, 得到 %d", http.StatusOK, w.Code)
+	}
+}
