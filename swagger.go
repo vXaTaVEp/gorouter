@@ -226,7 +226,8 @@ func (r *Router) generateQueryParameters(reqType reflect.Type) []swaggerParamete
 		reqType = reqType.Elem()
 	}
 
-	if reqType.Kind() != reflect.Struct {
+	// 再次检查 nil（处理 any 类型的情况）
+	if reqType == nil || reqType.Kind() != reflect.Struct {
 		return params
 	}
 
@@ -273,6 +274,18 @@ func (r *Router) generateRequestBody(reqType reflect.Type) *swaggerRequestBody {
 		reqType = reqType.Elem()
 	}
 
+	// 再次检查 nil（处理 any 类型的情况）
+	if reqType == nil {
+		return &swaggerRequestBody{
+			Required: true,
+			Content: map[string]interface{}{
+				"application/json": map[string]interface{}{
+					"schema": map[string]interface{}{"type": "object"},
+				},
+			},
+		}
+	}
+
 	schemaName := getTypeName(reqType)
 	if reqType.Kind() == reflect.Struct {
 		return &swaggerRequestBody{
@@ -307,7 +320,8 @@ func (r *Router) generateCommonResponseSchema(dataType reflect.Type) map[string]
 			dataType = dataType.Elem()
 		}
 
-		if dataType.Kind() == reflect.Struct {
+		// 检查 nil（处理 any 类型的情况）
+		if dataType != nil && dataType.Kind() == reflect.Struct {
 			schemaName := getTypeName(dataType)
 			dataSchema = map[string]interface{}{
 				"$ref": fmt.Sprintf("#/components/schemas/%s", schemaName),
@@ -338,6 +352,11 @@ func (r *Router) generateCommonResponseSchema(dataType reflect.Type) map[string]
 
 // generateSchema 生成 Schema
 func (r *Router) generateSchema(typ reflect.Type) map[string]interface{} {
+	// 检查 nil 类型（当使用 any 类型时可能为 nil）
+	if typ == nil {
+		return map[string]interface{}{"type": "object"}
+	}
+
 	// 处理指针类型
 	if typ.Kind() == reflect.Ptr {
 		typ = typ.Elem()
@@ -422,9 +441,18 @@ func (r *Router) generateMapSchema(typ reflect.Type) map[string]interface{} {
 
 // getFieldSchema 获取字段的 Schema
 func (r *Router) getFieldSchema(typ reflect.Type) interface{} {
+	// 检查 nil 类型（当使用 any 类型时可能为 nil）
+	if typ == nil {
+		return map[string]interface{}{"type": "object"}
+	}
+
 	// 处理指针类型
 	if typ.Kind() == reflect.Ptr {
 		typ = typ.Elem()
+		// 再次检查 nil（处理指向 any 的指针）
+		if typ == nil {
+			return map[string]interface{}{"type": "object"}
+		}
 	}
 
 	switch typ.Kind() {
