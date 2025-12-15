@@ -228,7 +228,7 @@ func postHandler[Req any, Resp any](cfg Config, handler postHandlerFunc[Req, Res
 			requestName := reflect.TypeOf(req).Name()
 			l.Infof("%s %s", requestName, PrettyJSON(req))
 		} else {
-			l.Infof("Request: %s {}")
+			l.Info("Request: {}")
 		}
 
 		// 调用业务处理函数
