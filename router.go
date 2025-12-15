@@ -211,6 +211,28 @@ func (r *Router) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	routeHandler := http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 		// 查找匹配的路由处理器
 		pathHandlers, exists := r.handlers[req.URL.Path]
+
+		// 如果精确匹配失败，尝试前缀匹配（用于 Swagger UI 等需要处理子路径的情况）
+		if !exists {
+			// 查找最长的匹配前缀
+			var matchedPath string
+			var matchedHandlers map[string]http.HandlerFunc
+			for path, handlers := range r.handlers {
+				// 检查是否是前缀匹配，且路径以 / 结尾（表示需要处理子路径）
+				if strings.HasSuffix(path, "/") && strings.HasPrefix(req.URL.Path, path) {
+					if len(path) > len(matchedPath) {
+						matchedPath = path
+						matchedHandlers = handlers
+					}
+				}
+			}
+
+			if matchedHandlers != nil {
+				pathHandlers = matchedHandlers
+				exists = true
+			}
+		}
+
 		if !exists {
 			// 路径不存在，返回404
 			sendErrorResponse(w, http.StatusNotFound, "path not found")
