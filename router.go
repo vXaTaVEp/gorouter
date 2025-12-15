@@ -119,22 +119,28 @@ func (r *Router) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 }
 
 type Context interface {
+	GetContext() context.Context
 	GetConfig() Config
 	GetClaims() Claims
 }
 
 // handlerContext 处理器上下文，包含配置等信息
 type handlerContext struct {
-	Config Config
-	Claims Claims
+	ctx    context.Context
+	config Config
+	claims Claims
+}
+
+func (h handlerContext) GetContext() context.Context {
+	return h.ctx
 }
 
 func (h handlerContext) GetConfig() Config {
-	return h.Config
+	return h.config
 }
 
 func (h handlerContext) GetClaims() Claims {
-	return h.Claims
+	return h.claims
 }
 
 // postHandlerFunc 定义业务处理函数的通用类型
@@ -157,7 +163,8 @@ func postHandler[Req any, Resp any](cfg Config, handler postHandlerFunc[Req, Res
 
 		// 创建处理器上下文
 		ctx := &handlerContext{
-			Config: cfg,
+			ctx:    r.Context(),
+			config: cfg,
 		}
 
 		// JWT认证中间件
@@ -168,7 +175,7 @@ func postHandler[Req any, Resp any](cfg Config, handler postHandlerFunc[Req, Res
 				return
 			}
 			// 将用户信息存储到请求上下文中，供后续使用
-			ctx.Claims = *claims
+			ctx.claims = *claims
 		}
 
 		// 记录请求开始时间
@@ -254,7 +261,8 @@ func getHandler[Req any, Resp any](cfg Config, handler getHandlerFunc[Req, Resp]
 
 		// 创建处理器上下文
 		ctx := &handlerContext{
-			Config: cfg,
+			ctx:    r.Context(),
+			config: cfg,
 		}
 
 		// JWT认证中间件
@@ -265,7 +273,7 @@ func getHandler[Req any, Resp any](cfg Config, handler getHandlerFunc[Req, Resp]
 				return
 			}
 			// 将用户信息存储到请求上下文中，供后续使用
-			ctx.Claims = *claims
+			ctx.claims = *claims
 		}
 
 		// 记录请求开始时间
