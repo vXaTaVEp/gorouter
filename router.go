@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"reflect"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/vXaTaVEp/l"
@@ -21,17 +22,17 @@ type RouteInfo struct {
 
 // Router 管理HTTP路由
 type Router struct {
-	mux    *http.ServeMux
-	server *http.Server
-	routes []RouteInfo
-	cfg    Config
+	handlers map[string]map[string]http.HandlerFunc // path -> method -> handler
+	server   *http.Server
+	routes   []RouteInfo
+	cfg      Config
 }
 
 // NewRouter 创建新的路由器实例
 func NewRouter(cfg Config) *Router {
 	router := &Router{
-		mux: http.NewServeMux(),
-		cfg: cfg,
+		handlers: make(map[string]map[string]http.HandlerFunc),
+		cfg:      cfg,
 	}
 
 	router.server = &http.Server{
@@ -58,23 +59,14 @@ func (r *Router) Stop(ctx context.Context) error {
 
 // AddRoute 添加POST路由
 func (r *Router) AddRoute(path string, handlerFunc http.HandlerFunc) {
-	r.mux.HandleFunc(path, func(w http.ResponseWriter, req *http.Request) {
-		if req.Method != http.MethodPost {
-			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-			return
-		}
-		handlerFunc(w, req)
-	})
+	r.registerHandler(path, http.MethodPost, handlerFunc)
 }
 
 // Post 添加路由，使用postHandler包装处理函数
 func Post[Req any, Resp any](
 	r *Router, path string, handlerFunc postHandlerFunc[Req, Resp],
 ) {
-	r.mux.HandleFunc(
-		path,
-		postHandler(r.cfg, handlerFunc, false),
-	)
+	r.registerHandler(path, http.MethodPost, postHandler(r.cfg, handlerFunc, false))
 	r.routes = append(r.routes, RouteInfo{Path: path, Method: "POST"})
 }
 
@@ -82,10 +74,7 @@ func Post[Req any, Resp any](
 func PostWithAuth[Req any, Resp any](
 	r *Router, path string, handlerFunc postHandlerFunc[Req, Resp],
 ) {
-	r.mux.HandleFunc(
-		path,
-		postHandler(r.cfg, handlerFunc, true),
-	)
+	r.registerHandler(path, http.MethodPost, postHandler(r.cfg, handlerFunc, true))
 	r.routes = append(r.routes, RouteInfo{Path: path, Method: "POST"})
 }
 
@@ -93,10 +82,7 @@ func PostWithAuth[Req any, Resp any](
 func Get[Req any, Resp any](
 	r *Router, path string, handlerFunc getHandlerFunc[Req, Resp],
 ) {
-	r.mux.HandleFunc(
-		path,
-		getHandler(r.cfg, handlerFunc, false),
-	)
+	r.registerHandler(path, http.MethodGet, getHandler(r.cfg, handlerFunc, false))
 	r.routes = append(r.routes, RouteInfo{Path: path, Method: "GET"})
 }
 
@@ -104,10 +90,7 @@ func Get[Req any, Resp any](
 func GetWithAuth[Req any, Resp any](
 	r *Router, path string, handlerFunc getHandlerFunc[Req, Resp],
 ) {
-	r.mux.HandleFunc(
-		path,
-		getHandler(r.cfg, handlerFunc, true),
-	)
+	r.registerHandler(path, http.MethodGet, getHandler(r.cfg, handlerFunc, true))
 	r.routes = append(r.routes, RouteInfo{Path: path, Method: "GET"})
 }
 
@@ -115,10 +98,7 @@ func GetWithAuth[Req any, Resp any](
 func Put[Req any, Resp any](
 	r *Router, path string, handlerFunc putHandlerFunc[Req, Resp],
 ) {
-	r.mux.HandleFunc(
-		path,
-		putHandler(r.cfg, handlerFunc, false),
-	)
+	r.registerHandler(path, http.MethodPut, putHandler(r.cfg, handlerFunc, false))
 	r.routes = append(r.routes, RouteInfo{Path: path, Method: "PUT"})
 }
 
@@ -126,10 +106,7 @@ func Put[Req any, Resp any](
 func PutWithAuth[Req any, Resp any](
 	r *Router, path string, handlerFunc putHandlerFunc[Req, Resp],
 ) {
-	r.mux.HandleFunc(
-		path,
-		putHandler(r.cfg, handlerFunc, true),
-	)
+	r.registerHandler(path, http.MethodPut, putHandler(r.cfg, handlerFunc, true))
 	r.routes = append(r.routes, RouteInfo{Path: path, Method: "PUT"})
 }
 
@@ -137,10 +114,7 @@ func PutWithAuth[Req any, Resp any](
 func Delete[Req any, Resp any](
 	r *Router, path string, handlerFunc deleteHandlerFunc[Req, Resp],
 ) {
-	r.mux.HandleFunc(
-		path,
-		deleteHandler(r.cfg, handlerFunc, false),
-	)
+	r.registerHandler(path, http.MethodDelete, deleteHandler(r.cfg, handlerFunc, false))
 	r.routes = append(r.routes, RouteInfo{Path: path, Method: "DELETE"})
 }
 
@@ -148,18 +122,44 @@ func Delete[Req any, Resp any](
 func DeleteWithAuth[Req any, Resp any](
 	r *Router, path string, handlerFunc deleteHandlerFunc[Req, Resp],
 ) {
-	r.mux.HandleFunc(
-		path,
-		deleteHandler(r.cfg, handlerFunc, true),
-	)
+	r.registerHandler(path, http.MethodDelete, deleteHandler(r.cfg, handlerFunc, true))
 	r.routes = append(r.routes, RouteInfo{Path: path, Method: "DELETE"})
+}
+
+// registerHandler 注册路由处理器
+func (r *Router) registerHandler(path, method string, handler http.HandlerFunc) {
+	if r.handlers[path] == nil {
+		r.handlers[path] = make(map[string]http.HandlerFunc)
+	}
+	r.handlers[path][method] = handler
 }
 
 // ServeHTTP 实现http.Handler接口，应用中间件
 func (r *Router) ServeHTTP(w http.ResponseWriter, req *http.Request) {
+	// 查找匹配的路由处理器
+	pathHandlers, exists := r.handlers[req.URL.Path]
+	if !exists {
+		// 路径不存在，返回404
+		sendErrorResponse(w, http.StatusNotFound, "path not found")
+		return
+	}
+
+	handler, exists := pathHandlers[req.Method]
+	if !exists {
+		// 方法不存在，返回405 Method Not Allowed
+		// 收集该路径支持的方法
+		allowedMethods := make([]string, 0, len(pathHandlers))
+		for method := range pathHandlers {
+			allowedMethods = append(allowedMethods, method)
+		}
+		w.Header().Set("Allow", strings.Join(allowedMethods, ", "))
+		sendErrorResponse(w, http.StatusMethodNotAllowed, fmt.Sprintf("method %s not allowed for path %s", req.Method, req.URL.Path))
+		return
+	}
+
 	// 应用中间件链：Recovery -> CORS -> Logger -> 业务处理
-	handler := Recovery(CORS(Logger(r.mux)))
-	handler.ServeHTTP(w, req)
+	middlewareChain := Recovery(CORS(Logger(http.HandlerFunc(handler))))
+	middlewareChain.ServeHTTP(w, req)
 }
 
 // postHandlerFunc 定义业务处理函数的通用类型

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 )
@@ -492,5 +493,422 @@ func TestRoutesRegistration(t *testing.T) {
 		if expectedMethods[route.Path] != route.Method {
 			t.Errorf("路由 %s 的方法期望 %s, 得到 %s", route.Path, expectedMethods[route.Path], route.Method)
 		}
+	}
+}
+
+// TestSamePathDifferentMethods 测试同一路径的不同 HTTP 方法
+func TestSamePathDifferentMethods(t *testing.T) {
+	cfg := newTestConfig()
+	router := NewRouter(cfg)
+
+	// 为同一路径注册不同的 HTTP 方法
+	Get(router, "/api/user", func(ctx Context, req *TestRequest) (*TestResponse, error) {
+		return &TestResponse{Result: "GET user"}, nil
+	})
+
+	Post(router, "/api/user", func(ctx Context, req *TestRequest) (*TestResponse, error) {
+		return &TestResponse{Result: "POST user"}, nil
+	})
+
+	Put(router, "/api/user", func(ctx Context, req *TestRequest) (*TestResponse, error) {
+		return &TestResponse{Result: "PUT user"}, nil
+	})
+
+	Delete(router, "/api/user", func(ctx Context, req *TestRequest) (*TestResponse, error) {
+		return &TestResponse{Result: "DELETE user"}, nil
+	})
+
+	// 测试 GET 方法
+	req := httptest.NewRequest(http.MethodGet, "/api/user?name=test", nil)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("GET 方法期望状态码 %d, 得到 %d", http.StatusOK, w.Code)
+	}
+
+	var resp CommonResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("解析响应失败: %v", err)
+	}
+
+	data, _ := json.Marshal(resp.Data)
+	var testResp TestResponse
+	json.Unmarshal(data, &testResp)
+	if testResp.Result != "GET user" {
+		t.Errorf("GET 方法期望结果 'GET user', 得到 '%s'", testResp.Result)
+	}
+
+	// 测试 POST 方法
+	reqBody := TestRequest{Name: "test", Value: 123}
+	body, _ := json.Marshal(reqBody)
+	req = httptest.NewRequest(http.MethodPost, "/api/user", bytes.NewBuffer(body))
+	req.Header.Set("Content-Type", "application/json")
+	w = httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("POST 方法期望状态码 %d, 得到 %d", http.StatusOK, w.Code)
+	}
+
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("解析响应失败: %v", err)
+	}
+
+	data, _ = json.Marshal(resp.Data)
+	json.Unmarshal(data, &testResp)
+	if testResp.Result != "POST user" {
+		t.Errorf("POST 方法期望结果 'POST user', 得到 '%s'", testResp.Result)
+	}
+
+	// 测试 PUT 方法
+	req = httptest.NewRequest(http.MethodPut, "/api/user", bytes.NewBuffer(body))
+	req.Header.Set("Content-Type", "application/json")
+	w = httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("PUT 方法期望状态码 %d, 得到 %d", http.StatusOK, w.Code)
+	}
+
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("解析响应失败: %v", err)
+	}
+
+	data, _ = json.Marshal(resp.Data)
+	json.Unmarshal(data, &testResp)
+	if testResp.Result != "PUT user" {
+		t.Errorf("PUT 方法期望结果 'PUT user', 得到 '%s'", testResp.Result)
+	}
+
+	// 测试不支持的 HTTP 方法
+	req = httptest.NewRequest(http.MethodPatch, "/api/user", nil)
+	w = httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusMethodNotAllowed {
+		t.Errorf("PATCH 方法期望状态码 %d, 得到 %d", http.StatusMethodNotAllowed, w.Code)
+	}
+
+	// 验证 Allow 头包含支持的方法
+	allowHeader := w.Header().Get("Allow")
+	if allowHeader == "" {
+		t.Error("期望 Allow 头存在")
+	}
+
+	// 测试 DELETE 方法
+	req = httptest.NewRequest(http.MethodDelete, "/api/user", bytes.NewBuffer(body))
+	req.Header.Set("Content-Type", "application/json")
+	w = httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("DELETE 方法期望状态码 %d, 得到 %d", http.StatusOK, w.Code)
+	}
+
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("解析响应失败: %v", err)
+	}
+
+	data, _ = json.Marshal(resp.Data)
+	json.Unmarshal(data, &testResp)
+	if testResp.Result != "DELETE user" {
+		t.Errorf("DELETE 方法期望结果 'DELETE user', 得到 '%s'", testResp.Result)
+	}
+}
+
+// TestSamePathWithAuth 测试同一路径的不同 HTTP 方法（带认证）
+func TestSamePathWithAuth(t *testing.T) {
+	cfg := newTestConfig()
+	router := NewRouter(cfg)
+
+	// 为同一路径注册不同的 HTTP 方法（带认证）
+	GetWithAuth(router, "/api/resource", func(ctx Context, req *TestRequest) (*TestResponse, error) {
+		claims := ctx.GetClaims()
+		return &TestResponse{Result: "GET resource: " + claims.Username}, nil
+	})
+
+	PostWithAuth(router, "/api/resource", func(ctx Context, req *TestRequest) (*TestResponse, error) {
+		claims := ctx.GetClaims()
+		return &TestResponse{Result: "POST resource: " + claims.Username}, nil
+	})
+
+	PutWithAuth(router, "/api/resource", func(ctx Context, req *TestRequest) (*TestResponse, error) {
+		claims := ctx.GetClaims()
+		return &TestResponse{Result: "PUT resource: " + claims.Username}, nil
+	})
+
+	DeleteWithAuth(router, "/api/resource", func(ctx Context, req *TestRequest) (*TestResponse, error) {
+		claims := ctx.GetClaims()
+		return &TestResponse{Result: "DELETE resource: " + claims.Username}, nil
+	})
+
+	// 生成 token
+	token, err := GenerateToken(cfg.GetSecretKey(), cfg.GetExpiration(), "testuser", 1)
+	if err != nil {
+		t.Fatalf("生成token失败: %v", err)
+	}
+
+	// 测试 GET 方法（带认证）
+	req := httptest.NewRequest(http.MethodGet, "/api/resource?name=test", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("GET 方法期望状态码 %d, 得到 %d", http.StatusOK, w.Code)
+	}
+
+	var resp CommonResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("解析响应失败: %v", err)
+	}
+
+	data, _ := json.Marshal(resp.Data)
+	var testResp TestResponse
+	json.Unmarshal(data, &testResp)
+	expected := "GET resource: testuser"
+	if testResp.Result != expected {
+		t.Errorf("GET 方法期望结果 '%s', 得到 '%s'", expected, testResp.Result)
+	}
+
+	// 测试 POST 方法（带认证）
+	reqBody := TestRequest{Name: "test", Value: 123}
+	body, _ := json.Marshal(reqBody)
+	req = httptest.NewRequest(http.MethodPost, "/api/resource", bytes.NewBuffer(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+token)
+	w = httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("POST 方法期望状态码 %d, 得到 %d", http.StatusOK, w.Code)
+	}
+
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("解析响应失败: %v", err)
+	}
+
+	data, _ = json.Marshal(resp.Data)
+	json.Unmarshal(data, &testResp)
+	expected = "POST resource: testuser"
+	if testResp.Result != expected {
+		t.Errorf("POST 方法期望结果 '%s', 得到 '%s'", expected, testResp.Result)
+	}
+
+	// 测试 PUT 方法（带认证）
+	req = httptest.NewRequest(http.MethodPut, "/api/resource", bytes.NewBuffer(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+token)
+	w = httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("PUT 方法期望状态码 %d, 得到 %d", http.StatusOK, w.Code)
+	}
+
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("解析响应失败: %v", err)
+	}
+
+	data, _ = json.Marshal(resp.Data)
+	json.Unmarshal(data, &testResp)
+	expected = "PUT resource: testuser"
+	if testResp.Result != expected {
+		t.Errorf("PUT 方法期望结果 '%s', 得到 '%s'", expected, testResp.Result)
+	}
+
+	// 测试 DELETE 方法（带认证）
+	req = httptest.NewRequest(http.MethodDelete, "/api/resource", bytes.NewBuffer(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+token)
+	w = httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("DELETE 方法期望状态码 %d, 得到 %d", http.StatusOK, w.Code)
+	}
+
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("解析响应失败: %v", err)
+	}
+
+	data, _ = json.Marshal(resp.Data)
+	json.Unmarshal(data, &testResp)
+	expected = "DELETE resource: testuser"
+	if testResp.Result != expected {
+		t.Errorf("DELETE 方法期望结果 '%s', 得到 '%s'", expected, testResp.Result)
+	}
+}
+
+// TestSamePathMixedAuth 测试同一路径混合认证和非认证的路由
+func TestSamePathMixedAuth(t *testing.T) {
+	cfg := newTestConfig()
+	router := NewRouter(cfg)
+
+	// 同一路径：GET 不需要认证，POST 需要认证
+	Get(router, "/api/mixed", func(ctx Context, req *TestRequest) (*TestResponse, error) {
+		return &TestResponse{Result: "GET public"}, nil
+	})
+
+	PostWithAuth(router, "/api/mixed", func(ctx Context, req *TestRequest) (*TestResponse, error) {
+		claims := ctx.GetClaims()
+		return &TestResponse{Result: "POST private: " + claims.Username}, nil
+	})
+
+	// 测试 GET 方法（不需要认证）
+	req := httptest.NewRequest(http.MethodGet, "/api/mixed?name=test", nil)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("GET 方法期望状态码 %d, 得到 %d", http.StatusOK, w.Code)
+	}
+
+	var resp CommonResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("解析响应失败: %v", err)
+	}
+
+	data, _ := json.Marshal(resp.Data)
+	var testResp TestResponse
+	json.Unmarshal(data, &testResp)
+	if testResp.Result != "GET public" {
+		t.Errorf("GET 方法期望结果 'GET public', 得到 '%s'", testResp.Result)
+	}
+
+	// 测试 POST 方法（需要认证，但没有提供 token）
+	reqBody := TestRequest{Name: "test", Value: 123}
+	body, _ := json.Marshal(reqBody)
+	req = httptest.NewRequest(http.MethodPost, "/api/mixed", bytes.NewBuffer(body))
+	req.Header.Set("Content-Type", "application/json")
+	w = httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusUnauthorized {
+		t.Errorf("POST 方法（无认证）期望状态码 %d, 得到 %d", http.StatusUnauthorized, w.Code)
+	}
+
+	// 测试 POST 方法（需要认证，提供 token）
+	token, err := GenerateToken(cfg.GetSecretKey(), cfg.GetExpiration(), "testuser", 1)
+	if err != nil {
+		t.Fatalf("生成token失败: %v", err)
+	}
+
+	req = httptest.NewRequest(http.MethodPost, "/api/mixed", bytes.NewBuffer(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+token)
+	w = httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("POST 方法（有认证）期望状态码 %d, 得到 %d", http.StatusOK, w.Code)
+	}
+
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("解析响应失败: %v", err)
+	}
+
+	data, _ = json.Marshal(resp.Data)
+	json.Unmarshal(data, &testResp)
+	expected := "POST private: testuser"
+	if testResp.Result != expected {
+		t.Errorf("POST 方法期望结果 '%s', 得到 '%s'", expected, testResp.Result)
+	}
+}
+
+// TestSamePathNotFound 测试同一路径不存在的情况
+func TestSamePathNotFound(t *testing.T) {
+	cfg := newTestConfig()
+	router := NewRouter(cfg)
+
+	// 注册一个路径
+	Get(router, "/api/exists", func(ctx Context, req *TestRequest) (*TestResponse, error) {
+		return &TestResponse{Result: "exists"}, nil
+	})
+
+	// 测试不存在的路径
+	req := httptest.NewRequest(http.MethodGet, "/api/notfound", nil)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusNotFound {
+		t.Errorf("期望状态码 %d, 得到 %d", http.StatusNotFound, w.Code)
+	}
+
+	var resp CommonResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("解析响应失败: %v", err)
+	}
+
+	if resp.Message != "path not found" {
+		t.Errorf("期望错误消息 'path not found', 得到 '%s'", resp.Message)
+	}
+}
+
+// TestSamePathMethodNotAllowed 测试同一路径不支持的方法
+func TestSamePathMethodNotAllowed(t *testing.T) {
+	cfg := newTestConfig()
+	router := NewRouter(cfg)
+
+	// 只注册 GET 和 POST 方法
+	Get(router, "/api/limited", func(ctx Context, req *TestRequest) (*TestResponse, error) {
+		return &TestResponse{Result: "GET"}, nil
+	})
+
+	Post(router, "/api/limited", func(ctx Context, req *TestRequest) (*TestResponse, error) {
+		return &TestResponse{Result: "POST"}, nil
+	})
+
+	// 测试支持的 GET 方法
+	req := httptest.NewRequest(http.MethodGet, "/api/limited?name=test", nil)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("GET 方法期望状态码 %d, 得到 %d", http.StatusOK, w.Code)
+	}
+
+	// 测试支持的 POST 方法
+	reqBody := TestRequest{Name: "test", Value: 123}
+	body, _ := json.Marshal(reqBody)
+	req = httptest.NewRequest(http.MethodPost, "/api/limited", bytes.NewBuffer(body))
+	req.Header.Set("Content-Type", "application/json")
+	w = httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("POST 方法期望状态码 %d, 得到 %d", http.StatusOK, w.Code)
+	}
+
+	// 测试不支持的 PUT 方法
+	req = httptest.NewRequest(http.MethodPut, "/api/limited", bytes.NewBuffer(body))
+	req.Header.Set("Content-Type", "application/json")
+	w = httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusMethodNotAllowed {
+		t.Errorf("PUT 方法期望状态码 %d, 得到 %d", http.StatusMethodNotAllowed, w.Code)
+	}
+
+	// 验证 Allow 头包含支持的方法
+	allowHeader := w.Header().Get("Allow")
+	if allowHeader == "" {
+		t.Error("期望 Allow 头存在")
+	}
+
+	// 验证 Allow 头包含 GET 和 POST
+	if !strings.Contains(allowHeader, "GET") || !strings.Contains(allowHeader, "POST") {
+		t.Errorf("Allow 头应该包含 GET 和 POST, 得到 '%s'", allowHeader)
+	}
+
+	// 测试不支持的 DELETE 方法
+	req = httptest.NewRequest(http.MethodDelete, "/api/limited", bytes.NewBuffer(body))
+	req.Header.Set("Content-Type", "application/json")
+	w = httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusMethodNotAllowed {
+		t.Errorf("DELETE 方法期望状态码 %d, 得到 %d", http.StatusMethodNotAllowed, w.Code)
 	}
 }
