@@ -360,6 +360,10 @@ func (r *Router) generateSchema(typ reflect.Type) map[string]interface{} {
 	// 处理指针类型
 	if typ.Kind() == reflect.Ptr {
 		typ = typ.Elem()
+		// 再次检查 nil（处理指向 any 的指针）
+		if typ == nil {
+			return map[string]interface{}{"type": "object"}
+		}
 	}
 
 	switch typ.Kind() {
