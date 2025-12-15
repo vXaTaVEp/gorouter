@@ -7,4 +7,6 @@ type Config interface {
 	GetReadTimeout() time.Duration
 	GetWriteTimeout() time.Duration
 	GetIdleTimeout() time.Duration
+	GetSecretKey() string
+	GetExpiration() time.Duration
 }

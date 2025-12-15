@@ -60,7 +60,7 @@ func (v *Validator) Errors() ValidationErrors {
 // ValidateRequired 验证必填字段
 func (v *Validator) ValidateRequired(field, value string) {
 	if strings.TrimSpace(value) == "" {
-		v.AddError(field, "此字段为必填项")
+		v.AddError(field, "required: "+field)
 	}
 }
 
@@ -72,7 +72,7 @@ func (v *Validator) ValidateEmail(field, email string) {
 
 	emailRegex := regexp.MustCompile(`^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$`)
 	if !emailRegex.MatchString(email) {
-		v.AddError(field, "邮箱格式不正确")
+		v.AddError(field, "invalid email format")
 	}
 }
 
@@ -80,20 +80,20 @@ func (v *Validator) ValidateEmail(field, email string) {
 func (v *Validator) ValidateLength(field, value string, min, max int) {
 	length := len(strings.TrimSpace(value))
 	if length < min {
-		v.AddError(field, "长度不能少于"+string(rune(min))+"个字符")
+		v.AddError(field, "length must be greater than "+string(rune(min)))
 	}
 	if length > max {
-		v.AddError(field, "长度不能超过"+string(rune(max))+"个字符")
+		v.AddError(field, "length must be less than "+string(rune(max)))
 	}
 }
 
 // ValidateRange 验证数值范围
 func (v *Validator) ValidateRange(field string, value, min, max int) {
 	if value < min {
-		v.AddError(field, "值不能小于"+string(rune(min)))
+		v.AddError(field, "value must be greater than "+string(rune(min)))
 	}
 	if value > max {
-		v.AddError(field, "值不能大于"+string(rune(max)))
+		v.AddError(field, "value must be less than "+string(rune(max)))
 	}
 }
 
@@ -117,16 +117,16 @@ func (v *Validator) ValidatePassword(field, password string) {
 
 	// 至少8位，包含字母和数字
 	if len(password) < 8 {
-		v.AddError(field, "密码长度至少8位")
+		v.AddError(field, "password length must be greater than 8")
 	}
 
 	hasLetter := regexp.MustCompile(`[a-zA-Z]`).MatchString(password)
 	hasDigit := regexp.MustCompile(`[0-9]`).MatchString(password)
 
 	if !hasLetter {
-		v.AddError(field, "密码必须包含字母")
+		v.AddError(field, "password must contain letters")
 	}
 	if !hasDigit {
-		v.AddError(field, "密码必须包含数字")
+		v.AddError(field, "password must contain digits")
 	}
 }

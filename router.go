@@ -10,7 +10,7 @@ import (
 	"strconv"
 	"time"
 
-	"live-streaming-server/l"
+	"github.com/vXaTaVEp/l"
 )
 
 // RouteInfo 存储路由信息
@@ -24,15 +24,15 @@ type Router struct {
 	mux    *http.ServeMux
 	server *http.Server
 	routes []RouteInfo
+	cfg    Config
 }
 
 // NewRouter 创建新的路由器实例
 func NewRouter(cfg Config) *Router {
 	router := &Router{
 		mux: http.NewServeMux(),
+		cfg: cfg,
 	}
-
-	router.Setup()
 
 	router.server = &http.Server{
 		Addr:         cfg.GetAddress(),
@@ -43,12 +43,6 @@ func NewRouter(cfg Config) *Router {
 	}
 
 	return router
-}
-
-// Setup 设置默认路由
-func (r *Router) Setup() {
-	// API路由 - 使用POST方法
-	Post(r, "/api/echo", Echo)
 }
 
 // Start 启动HTTP服务器
@@ -79,7 +73,7 @@ func Post[Req any, Resp any](
 ) {
 	r.mux.HandleFunc(
 		path,
-		postHandler(handlerFunc, false),
+		postHandler(r.cfg, handlerFunc, false),
 	)
 	r.routes = append(r.routes, RouteInfo{Path: path, Method: "POST"})
 }
@@ -90,7 +84,7 @@ func PostWithAuth[Req any, Resp any](
 ) {
 	r.mux.HandleFunc(
 		path,
-		postHandler(handlerFunc, true),
+		postHandler(r.cfg, handlerFunc, true),
 	)
 	r.routes = append(r.routes, RouteInfo{Path: path, Method: "POST"})
 }
@@ -101,7 +95,7 @@ func Get[Req any, Resp any](
 ) {
 	r.mux.HandleFunc(
 		path,
-		getHandler(handlerFunc, false),
+		getHandler(r.cfg, handlerFunc, false),
 	)
 	r.routes = append(r.routes, RouteInfo{Path: path, Method: "GET"})
 }
@@ -112,7 +106,7 @@ func GetWithAuth[Req any, Resp any](
 ) {
 	r.mux.HandleFunc(
 		path,
-		getHandler(handlerFunc, true),
+		getHandler(r.cfg, handlerFunc, true),
 	)
 	r.routes = append(r.routes, RouteInfo{Path: path, Method: "GET"})
 }
@@ -124,17 +118,36 @@ func (r *Router) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	handler.ServeHTTP(w, req)
 }
 
+type Context interface {
+	GetConfig() Config
+	GetClaims() Claims
+}
+
+// handlerContext 处理器上下文，包含配置等信息
+type handlerContext struct {
+	Config Config
+	Claims Claims
+}
+
+func (h handlerContext) GetConfig() Config {
+	return h.Config
+}
+
+func (h handlerContext) GetClaims() Claims {
+	return h.Claims
+}
+
 // postHandlerFunc 定义业务处理函数的通用类型
-// 接收一个请求结构体指针，返回一个响应结构体和错误
-type postHandlerFunc[Req any, Resp any] func(*Req) (*Resp, error)
+// 接收一个上下文、请求结构体指针，返回一个响应结构体和错误
+type postHandlerFunc[Req any, Resp any] func(Context, *Req) (*Resp, error)
 
 // getHandlerFunc 定义业务处理函数的通用类型
-// 接收一个请求结构体指针，返回一个响应结构体和错误
-type getHandlerFunc[Req any, Resp any] func(*Req) (*Resp, error)
+// 接收一个上下文、请求结构体指针，返回一个响应结构体和错误
+type getHandlerFunc[Req any, Resp any] func(Context, *Req) (*Resp, error)
 
 // postHandler 封装业务处理函数为HTTP处理器
 // 处理请求解析和响应生成，确保所有接口使用POST方法
-func postHandler[Req any, Resp any](handler postHandlerFunc[Req, Resp], requireAuth bool) http.HandlerFunc {
+func postHandler[Req any, Resp any](cfg Config, handler postHandlerFunc[Req, Resp], requireAuth bool) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		// 只允许POST方法
 		if r.Method != http.MethodPost {
@@ -142,15 +155,20 @@ func postHandler[Req any, Resp any](handler postHandlerFunc[Req, Resp], requireA
 			return
 		}
 
+		// 创建处理器上下文
+		ctx := &handlerContext{
+			Config: cfg,
+		}
+
 		// JWT认证中间件
 		if requireAuth {
-			claims, err := GetUserFromRequest(r)
+			claims, err := GetUserFromRequest(cfg.GetSecretKey(), r)
 			if err != nil {
 				sendErrorResponse(w, http.StatusUnauthorized, "unauthorized: "+err.Error())
 				return
 			}
 			// 将用户信息存储到请求上下文中，供后续使用
-			r = r.WithContext(context.WithValue(r.Context(), "claims", claims))
+			ctx.Claims = *claims
 		}
 
 		// 记录请求开始时间
@@ -180,7 +198,7 @@ func postHandler[Req any, Resp any](handler postHandlerFunc[Req, Resp], requireA
 		}
 
 		// 调用业务处理函数
-		resp, err := handler(&req)
+		resp, err := handler(ctx, &req)
 		if err != nil {
 			sendErrorResponse(w, http.StatusInternalServerError, err.Error())
 			return
@@ -226,7 +244,7 @@ func sendErrorResponse(w http.ResponseWriter, statusCode int, msg string) {
 
 // getHandler 封装业务处理函数为HTTP处理器
 // 处理请求解析和响应生成，确保所有接口使用GET方法
-func getHandler[Req any, Resp any](handler getHandlerFunc[Req, Resp], requireAuth bool) http.HandlerFunc {
+func getHandler[Req any, Resp any](cfg Config, handler getHandlerFunc[Req, Resp], requireAuth bool) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		// 只允许GET方法
 		if r.Method != http.MethodGet {
@@ -234,15 +252,20 @@ func getHandler[Req any, Resp any](handler getHandlerFunc[Req, Resp], requireAut
 			return
 		}
 
+		// 创建处理器上下文
+		ctx := &handlerContext{
+			Config: cfg,
+		}
+
 		// JWT认证中间件
 		if requireAuth {
-			claims, err := GetUserFromRequest(r)
+			claims, err := GetUserFromRequest(cfg.GetSecretKey(), r)
 			if err != nil {
 				sendErrorResponse(w, http.StatusUnauthorized, "unauthorized: "+err.Error())
 				return
 			}
 			// 将用户信息存储到请求上下文中，供后续使用
-			r = r.WithContext(context.WithValue(r.Context(), "claims", claims))
+			ctx.Claims = *claims
 		}
 
 		// 记录请求开始时间
@@ -263,7 +286,7 @@ func getHandler[Req any, Resp any](handler getHandlerFunc[Req, Resp], requireAut
 		l.Infof("%s %s", requestName, PrettyJSON(req))
 
 		// 调用业务处理函数
-		resp, err := handler(&req)
+		resp, err := handler(ctx, &req)
 		if err != nil {
 			sendErrorResponse(w, http.StatusInternalServerError, err.Error())
 			return

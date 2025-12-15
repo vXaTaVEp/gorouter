@@ -6,9 +6,6 @@ import (
 	"strings"
 	"time"
 
-	"live-streaming-server/config"
-	"live-streaming-server/l"
-
 	"github.com/golang-jwt/jwt/v5"
 )
 
@@ -20,9 +17,8 @@ type Claims struct {
 }
 
 // GenerateToken 生成JWT token
-func GenerateToken(username string, userID int64) (string, error) {
-	jwtConfig := config.JWT()
-	expirationTime := time.Now().Add(jwtConfig.GetExpiration())
+func GenerateToken(secretKey string, expiration time.Duration, username string, userID int64) (string, error) {
+	expirationTime := time.Now().Add(expiration)
 
 	claims := &Claims{
 		UserID:   userID,
@@ -35,7 +31,7 @@ func GenerateToken(username string, userID int64) (string, error) {
 	}
 
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
-	tokenString, err := token.SignedString([]byte(jwtConfig.GetSecretKey()))
+	tokenString, err := token.SignedString([]byte(secretKey))
 	if err != nil {
 		return "", err
 	}
@@ -44,16 +40,14 @@ func GenerateToken(username string, userID int64) (string, error) {
 }
 
 // ValidateToken 验证并解析JWT token
-func ValidateToken(tokenString string) (*Claims, error) {
-	jwtConfig := config.JWT()
-
+func ValidateToken(secretKey string, tokenString string) (*Claims, error) {
 	claims := &Claims{}
 	token, err := jwt.ParseWithClaims(tokenString, claims, func(token *jwt.Token) (interface{}, error) {
 		// 验证签名算法
 		if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
 			return nil, errors.New("invalid signing method")
 		}
-		return []byte(jwtConfig.GetSecretKey()), nil
+		return []byte(secretKey), nil
 	})
 	if err != nil {
 		return nil, err
@@ -84,15 +78,14 @@ func ExtractTokenFromRequest(r *http.Request) (string, error) {
 }
 
 // GetUserFromRequest 从请求中提取用户信息（用于中间件）
-func GetUserFromRequest(r *http.Request) (*Claims, error) {
+func GetUserFromRequest(secretKey string, r *http.Request) (*Claims, error) {
 	tokenString, err := ExtractTokenFromRequest(r)
 	if err != nil {
 		return nil, err
 	}
 
-	claims, err := ValidateToken(tokenString)
+	claims, err := ValidateToken(secretKey, tokenString)
 	if err != nil {
-		l.Warnf("JWT validation failed: %v", err)
 		return nil, err
 	}
 
