@@ -32,14 +32,14 @@ type swaggerServer struct {
 type swaggerPath map[string]swaggerOperation
 
 type swaggerOperation struct {
-	Tags        []string                    `json:"tags,omitempty"`
-	Summary     string                      `json:"summary,omitempty"`
-	Description string                      `json:"description,omitempty"`
-	OperationID string                      `json:"operationId"`
-	Parameters  []swaggerParameter          `json:"parameters,omitempty"`
-	RequestBody *swaggerRequestBody         `json:"requestBody,omitempty"`
-	Responses   map[string]swaggerResponse  `json:"responses"`
-	Security    []map[string][]string        `json:"security,omitempty"`
+	Tags        []string                   `json:"tags,omitempty"`
+	Summary     string                     `json:"summary,omitempty"`
+	Description string                     `json:"description,omitempty"`
+	OperationID string                     `json:"operationId"`
+	Parameters  []swaggerParameter         `json:"parameters,omitempty"`
+	RequestBody *swaggerRequestBody        `json:"requestBody,omitempty"`
+	Responses   map[string]swaggerResponse `json:"responses"`
+	Security    []map[string][]string      `json:"security,omitempty"`
 }
 
 type swaggerParameter struct {
@@ -103,7 +103,7 @@ func (r *Router) generateSwaggerDoc(config *SwaggerConfig) *swaggerDoc {
 			Version:     config.Version,
 			Description: config.Description,
 		},
-		Paths:      make(map[string]swaggerPath),
+		Paths: make(map[string]swaggerPath),
 		Components: swaggerComponents{
 			Schemas:         make(map[string]interface{}),
 			SecuritySchemes: make(map[string]interface{}),
@@ -237,12 +237,18 @@ func (r *Router) generateQueryParameters(reqType reflect.Type) []swaggerParamete
 			continue
 		}
 
+		// 获取描述：优先使用 description tag，如果没有则留空
+		description := field.Tag.Get("description")
+		if description == "" {
+			description = field.Tag.Get("desc")
+		}
+
 		param := swaggerParameter{
 			Name:        queryTag,
 			In:          "query",
-			Description: field.Tag.Get("json"),
-			Required:    false, // 查询参数默认非必需
-			Schema:     r.getFieldSchema(field.Type),
+			Description: description, // 使用 description tag 或留空
+			Required:    false,       // 查询参数默认非必需
+			Schema:      r.getFieldSchema(field.Type),
 		}
 
 		// 检查是否有 required tag
@@ -409,7 +415,7 @@ func (r *Router) generateMapSchema(typ reflect.Type) map[string]interface{} {
 	valueSchema := r.getFieldSchema(valueType)
 
 	return map[string]interface{}{
-		"type": "object",
+		"type":                 "object",
 		"additionalProperties": valueSchema,
 	}
 }
